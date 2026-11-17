@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>pho29す 完全版 開発者用ダッシュボード</title>
+<style>
+  body { font-family: -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif; margin: 0; background: #fdf8f2; color: #3a2c22; }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 16px; }
+  h1 { font-size: 20px; margin: 8px 0 4px; }
+  .sub { color: #8a7160; font-size: 13px; margin-bottom: 14px; }
+  button { background: #e4572e; color: #fff; border: 0; border-radius: 10px; padding: 10px 18px; font-size: 15px; font-weight: 700; cursor: pointer; }
+  button.ghost { background: #fff; color: #e4572e; border: 2px solid #e4572e; }
+  .card { background: #fff; border-radius: 14px; padding: 14px; margin: 12px 0; box-shadow: 0 1px 4px rgba(0,0,0,.07); }
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  th, td { text-align: left; padding: 7px 6px; border-bottom: 1px solid #f0e4d8; vertical-align: top; }
+  th { color: #8a7160; font-size: 12px; }
+  .days span { display: inline-block; background: #fdf0e6; border-radius: 8px; padding: 2px 7px; margin: 1px 2px; font-size: 12px; }
+  .err { color: #c0392b; font-weight: 700; }
+  .banbadge { display: inline-block; background: #c0392b; color: #fff; border-radius: 8px; padding: 2px 8px; font-size: 12px; font-weight: 700; }
+  .banrow { background: #fdf0ef; }
+  .ctl button { padding: 5px 10px; font-size: 12.5px; border-radius: 8px; margin: 2px 2px 2px 0; }
+  .ctl input { padding: 5px 8px; font-size: 12.5px; border: 1px solid #ddd; border-radius: 8px; width: 150px; margin: 2px 2px 2px 0; }
+  .muted { color: #8a7160; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>📊 pho29す 完全版（29音）開発者用ダッシュボード</h1>
+  <div class="sub">完全版専用のアカウント・ランキングです（無料版ABC26とは別々）。開発者（gyushin.official@gmail.com）のGoogleアカウントでログインしたときだけ、中身が見られます。</div>
+  <div id="loginBox">
+    <button id="loginBtn">Googleでログイン</button>
+    <div class="msg muted" id="loginMsg" style="margin-top:8px;"></div>
+  </div>
+  <div id="main" style="display:none;">
+    <div class="card" id="summary">読み込み中…</div>
+    <div class="card">
+      <h3 style="margin:4px 0 8px;">日べつ合計（さいきん14日）</h3>
+      <div id="daily"></div>
+    </div>
+    <div class="card">
+      <h3 style="margin:4px 0 8px;">アカウントべつ</h3>
+      <div id="accounts">読み込み中…</div>
+    </div>
+    <button class="ghost" id="logoutBtn">ログアウト</button>
+  </div>
+</div>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script>
+const DEV_EMAIL = 'gyushin.official@gmail.com';
+firebase.initializeApp({
+  apiKey: 'AIzaSyArAIuGkLCvOyCOGkXdh3sQWqjC8FSnnGU',
+  authDomain: 'abc26-ranking.firebaseapp.com',
+  projectId: 'abc26-ranking',
+  appId: '1:600784447108:web:2e3c3a737214dac06084d1'
+});
+const auth = firebase.auth();
+const db = firebase.firestore();
+const $ = id => document.getElementById(id);
+function esc(s) { return String(s).replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch])); }
+function md(key) { const p = key.split('-'); return parseInt(p[1], 10) + '/' + parseInt(p[2], 10); }
+function full(key) { const p = key.split('-'); return p[0] + '年' + parseInt(p[1], 10) + '月' + parseInt(p[2], 10) + '日'; }
+
+$('loginBtn').onclick = () => {
+  $('loginMsg').textContent = '';
+  auth.signInWithPopup(new firebase.auth.GoogleAuthProvider()).catch(e => {
+    $('loginMsg').innerHTML = '<span class="err">ログインできませんでした：' + esc(e.message) + '</span>';
+  });
+};
+$('logoutBtn').onclick = () => auth.signOut();
+
+auth.onAuthStateChanged(async user => {
+  if (!user) { $('loginBox').style.display = 'block'; $('main').style.display = 'none'; return; }
+  if (user.email !== DEV_EMAIL) {
+    $('loginMsg').innerHTML = '<span class="err">このアカウント（' + esc(user.email || '') + '）では見られません。開発者のアカウントでログインしてね。</span>';
+    await auth.signOut();
+    return;
+  }
+  $('loginBox').style.display = 'none';
+  $('main').style.display = 'block';
+  loadData();
+});
+
+document.addEventListener('click', async e => {
+  const btn = e.target.closest('button[data-act]');
+  if (!btn) return;
+  const uid = btn.getAttribute('data-uid');
+  const act = btn.getAttribute('data-act');
+  if (!btn.dataset.armed) {
+    btn.dataset.armed = '1';
+    btn.textContent = act === 'ban' ? '本当に停止する？' : act === 'unban' ? '本当に解除する？' : '本当に削除する？';
+    btn.style.background = '#c0392b'; btn.style.color = '#fff'; btn.style.borderColor = '#c0392b';
+    setTimeout(() => { if (btn.dataset.armed) location.reload(); }, 6000);
+    return;
+  }
+  try {
+    if (act === 'ban') {
+      const reason = (document.getElementById('reason-' + uid).value || '').trim().slice(0, 200);
+      await db.collection('bans29').doc(uid).set({ reason: reason, name: btn.getAttribute('data-name') || '', ts: firebase.firestore.FieldValue.serverTimestamp() });
+    } else if (act === 'unban') {
+      await db.collection('bans29').doc(uid).delete();
+    } else if (act === 'delbest') {
+      await db.collection('bests29').doc(uid).delete();
+    }
+    loadData();
+  } catch (err) { alert('できませんでした：' + err.message); }
+});
+
+async function loadData() {
+  try {
+    const [ps, bs, bn] = await Promise.all([db.collection('players29').get(), db.collection('bests29').get(), db.collection('bans29').get()]);
+    const bans = {};
+    bn.forEach(d => { bans[d.id] = d.data(); });
+    const bests = {};
+    bs.forEach(d => { bests[d.id] = d.data(); });
+    const rows = [];
+    ps.forEach(d => {
+      const p = d.data();
+      const usage = p.usage || {};
+      const days = Object.keys(usage).sort().reverse();
+      const total = days.reduce((a, k) => a + (usage[k] || 0), 0);
+      rows.push({ id: d.id, name: (bests[d.id] && bests[d.id].name) || p.name || '', best: bests[d.id] || null, usage, days, total, ban: bans[d.id] || null,
+                  lastSeen: p.lastSeen ? p.lastSeen.toDate() : null, createdAt: p.createdAt ? p.createdAt.toDate() : null });
+    });
+    Object.keys(bests).forEach(id => {
+      if (!rows.find(r => r.id === id)) rows.push({ id, name: bests[id].name || '', best: bests[id], usage: {}, days: [], total: 0, ban: bans[id] || null, lastSeen: null, createdAt: null });
+    });
+    rows.sort((a, b) => (b.lastSeen || 0) - (a.lastSeen || 0));
+    const totalPlays = rows.reduce((a, r) => a + r.total, 0);
+    const todayKey = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Tokyo' }).format(new Date());
+    const todayPlays = rows.reduce((a, r) => a + ((r.usage || {})[todayKey] || 0), 0);
+    const banCount = rows.filter(r => r.ban).length;
+    $('summary').innerHTML = 'アカウント数：<b>' + rows.length + '</b>　／　タイムアタック合計：<b>' + totalPlays + ' 回</b>　／　今日：<b>' + todayPlays + ' 回</b>' + (banCount ? '　／　<span class="err">利用停止中：' + banCount + ' 件</span>' : '');
+    const daily = {};
+    rows.forEach(r => Object.keys(r.usage).forEach(k => { daily[k] = (daily[k] || 0) + r.usage[k]; }));
+    const dkeys = Object.keys(daily).sort().reverse().slice(0, 14);
+    $('daily').innerHTML = dkeys.length
+      ? '<table><tr><th>日</th><th>遊んだ回数</th><th>人数</th></tr>' + dkeys.map(k =>
+          '<tr><td>' + full(k) + '</td><td>' + daily[k] + ' 回</td><td>' + rows.filter(r => r.usage[k]).length + ' 人</td></tr>').join('') + '</table>'
+      : '<span class="muted">まだ記録がありません。</span>';
+    $('accounts').innerHTML = rows.length
+      ? '<table><tr><th>名前</th><th>ベスト記録</th><th>使った日（回数）</th><th>合計</th><th>最後に使った日</th><th>操作</th></tr>' + rows.map(r =>
+          '<tr' + (r.ban ? ' class="banrow"' : '') + '><td><b>' + esc(r.name || '（ニックネーム未設定）') + '</b>' + (r.ban ? '<br><span class="banbadge">利用停止中</span><br><span class="err">理由：' + esc(r.ban.reason || '（未記入）') + '</span>' : '') + '</td>' +
+          '<td>' + (r.best ? '正解' + r.best.correct + '・ミス' + r.best.wrong + '・<b>' + r.best.score + '点</b>' : '<span class="muted">まだなし</span>') + '</td>' +
+          '<td class="days">' + (r.days.length ? r.days.map(k => '<span>' + md(k) + '：' + r.usage[k] + '回</span>').join('') : '<span class="muted">なし</span>') + '</td>' +
+          '<td>' + r.days.length + '日・' + r.total + '回</td>' +
+          '<td>' + (r.lastSeen ? (r.lastSeen.getMonth() + 1) + '/' + r.lastSeen.getDate() : '―') + '</td>' +
+          '<td class="ctl">' + (r.ban
+            ? '<button data-act="unban" data-uid="' + r.id + '">停止を解除</button>'
+            : '<input id="reason-' + r.id + '" placeholder="停止の理由"><button data-act="ban" data-uid="' + r.id + '" data-name="' + esc(r.name || '') + '">利用停止にする</button>')
+          + (r.best ? '<button class="ghost" data-act="delbest" data-uid="' + r.id + '">ランキング記録を削除</button>' : '') + '</td></tr>').join('') + '</table>'
+      : '<span class="muted">まだアカウントがありません。</span>';
+  } catch (e) {
+    $('summary').innerHTML = '<span class="err">読み込めませんでした：' + esc(e.message) + '</span>';
+  }
+}
+</script>
+</body>
+</html>
