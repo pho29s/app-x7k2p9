@@ -95,9 +95,6 @@
       <button class="ghostbtn" onclick="saveName(document.getElementById('nameInput1'), document.getElementById('nameMsg1'))">ニックネームを保存</button>
       <div class="note" id="nameMsg1"></div>
       <div id="rankList1"></div>
-      <div class="note" style="margin-top:14px;">あなたのID（記録の付け替え用）</div>
-      <input class="namein" id="myIdInput" readonly value="" style="margin-top:4px;">
-      <button class="ghostbtn" id="copyIdBtn" onclick="copyMyId()">IDをコピー</button>
       <button class="ghostbtn" onclick="closeRank()">もどる</button>
     </div>
     <div class="panel hidden" id="gPlay">
@@ -499,26 +496,11 @@ async function saveName(inputEl, msgEl) {
     rankShow(document.getElementById('rankList1'));
   } catch (e) { msgEl.textContent = '保存できませんでした。通信状態を確認してね。'; }
 }
-async function showMyId() {
-  if (await ensureAuth()) {
-    const el = document.getElementById('myIdInput');
-    if (el) el.value = myUid || '';
-  }
-}
-function copyMyId() {
-  const el = document.getElementById('myIdInput');
-  if (!el || !el.value) return;
-  el.select();
-  try { navigator.clipboard.writeText(el.value); } catch (e) {}
-  try { document.execCommand('copy'); } catch (e) {}
-  const b = document.getElementById('copyIdBtn');
-  if (b) b.textContent = 'コピーしました ✓';
-}
 async function openRank() {
   document.getElementById('gStart').classList.add('hidden');
   document.getElementById('gEnd').classList.add('hidden');
   document.getElementById('gRank').classList.remove('hidden');
-  await showMyId();
+  await ensureAuth();
   rankShow(document.getElementById('rankList1'));
 }
 function closeRank() {
